@@ -39,7 +39,9 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.DIALECT_NAME;
 
@@ -51,36 +53,44 @@ public class OceanBaseDialect implements DataSourceDialect<OceanBaseSourceConfig
         return DIALECT_NAME;
     }
 
+    private void addTableIdListByTablePattern(
+            DatabaseMetaData metaData, String tableList, Set<TableId> tableIdSet)
+            throws SQLException {
+        String[] tablePatterns = tableList.split("\\|");
+        for (String tablePattern : tablePatterns) {
+            String[] parts = tablePattern.split("\\.");
+            if (parts.length == 3) {
+                String database = parts[1];
+                String table = parts[2];
+
+                // Handle wildcard patterns
+                if (database.contains("*") || table.contains("*")) {
+                    List<TableId> matchedTables =
+                            discoverTablesByPattern(metaData, database, table);
+                    tableIdSet.addAll(matchedTables);
+                } else {
+                    tableIdSet.add(TableId.parse(tablePattern));
+                }
+            }
+        }
+    }
+
     @Override
     public List<TableId> discoverDataCollections(OceanBaseSourceConfig sourceConfig) {
         List<TableId> tableIds = new ArrayList<>();
-
+        Set<TableId> whiteTableIdSet = new HashSet<>();
+        Set<TableId> blackTableIdSet = new HashSet<>();
         try (Connection connection = OceanBaseUtils.createJdbcConnection(sourceConfig)) {
             DatabaseMetaData metaData = connection.getMetaData();
-
-            // If table list is specified, use it; otherwise discover all tables
-            if (sourceConfig.getTableList() != null && !sourceConfig.getTableList().isEmpty()) {
-                for (String tablePattern : sourceConfig.getTableList()) {
-                    String[] parts = tablePattern.split("\\.");
-                    if (parts.length == 2) {
-                        String database = parts[0];
-                        String table = parts[1];
-
-                        // Handle wildcard patterns
-                        if (database.contains("*") || table.contains("*")) {
-                            List<TableId> matchedTables =
-                                    discoverTablesByPattern(metaData, database, table);
-                            tableIds.addAll(matchedTables);
-                        } else {
-                            tableIds.add(TableId.parse(tablePattern));
-                        }
-                    }
-                }
-            } else {
-                // Discover all tables in all databases
-                tableIds.addAll(discoverAllTables(metaData, sourceConfig.getTenantName()));
+            addTableIdListByTablePattern(
+                    metaData, sourceConfig.getWhiteTableList(), whiteTableIdSet);
+            if (sourceConfig.getBlackTableList() != null
+                    && !sourceConfig.getBlackTableList().isEmpty()) {
+                addTableIdListByTablePattern(
+                        metaData, sourceConfig.getBlackTableList(), blackTableIdSet);
             }
-
+            whiteTableIdSet.removeAll(blackTableIdSet);
+            tableIds.addAll(whiteTableIdSet);
             log.info(
                     "Discovered {} tables for OceanBase CDC: {}",
                     tableIds.size(),
@@ -151,27 +161,7 @@ public class OceanBaseDialect implements DataSourceDialect<OceanBaseSourceConfig
             while (rs.next()) {
                 String database = rs.getString("TABLE_SCHEM");
                 String table = rs.getString("TABLE_NAME");
-                if (database != null && table != null) {
-                    tableIds.add(TableId.parse(database + "." + table));
-                }
-            }
-        }
-
-        return tableIds;
-    }
-
-    /** Discover all tables in all databases */
-    private List<TableId> discoverAllTables(DatabaseMetaData metaData, String tenantName)
-            throws SQLException {
-        List<TableId> tableIds = new ArrayList<>();
-
-        try (ResultSet rs = metaData.getTables(null, null, null, new String[] {"TABLE"})) {
-            while (rs.next()) {
-                String database = rs.getString("TABLE_SCHEM");
-                String table = rs.getString("TABLE_NAME");
-
-                // Skip system databases
-                if (database != null && !isSystemDatabase(database)) {
+                if (database != null && !isSystemDatabase(database) && table != null) {
                     tableIds.add(TableId.parse(database + "." + table));
                 }
             }

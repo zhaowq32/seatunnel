@@ -36,25 +36,23 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.BATCH_SIZE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.CONFIG_URL;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.CONNECT_TIMEOUT_MS;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.BLACK_TABLE_LIST;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.CLUSTER_ID;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.CLUSTER_URL;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.EXACTLY_ONCE;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.JDBC_URL;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.LOGPROXY_HOST;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.LOGPROXY_PORT;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.MAX_RECONNECT_TIMES;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.PASSWORD;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.RECONNECT_INTERVAL_MS;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.RS_LIST;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.ROOT_SERVER_LIST;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SERVER_TIME_ZONE;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SPLIT_SIZE;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP_US;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SYS_PASSWORD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SYS_USERNAME;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.TABLE_LIST;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.TABLE_NAME;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.TENANT_NAME;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.USERNAME;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.WHITE_TABLE_LIST;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.WORKING_MODE;
 
 /** Factory for OceanBase CDC incremental source. */
@@ -69,20 +67,24 @@ public class OceanBaseIncrementalSourceFactory implements TableSourceFactory {
     @Override
     public OptionRule optionRule() {
         return OptionRule.builder()
-                .required(JDBC_URL, LOGPROXY_HOST, LOGPROXY_PORT, USERNAME, PASSWORD)
+                .required(
+                        JDBC_URL,
+                        LOGPROXY_HOST,
+                        LOGPROXY_PORT,
+                        USERNAME,
+                        PASSWORD,
+                        WHITE_TABLE_LIST)
                 .optional(
+                        CLUSTER_URL,
+                        ROOT_SERVER_LIST,
+                        BLACK_TABLE_LIST,
+                        START_TIMESTAMP,
+                        SERVER_TIME_ZONE,
+                        WORKING_MODE,
+                        START_TIMESTAMP_US,
+                        CLUSTER_ID,
                         SYS_USERNAME,
                         SYS_PASSWORD,
-                        TENANT_NAME,
-                        TABLE_NAME,
-                        TABLE_LIST,
-                        SERVER_TIME_ZONE,
-                        CONNECT_TIMEOUT_MS,
-                        START_TIMESTAMP,
-                        MAX_RECONNECT_TIMES,
-                        RECONNECT_INTERVAL_MS,
-                        RS_LIST,
-                        CONFIG_URL,
                         WORKING_MODE,
                         SPLIT_SIZE,
                         BATCH_SIZE,

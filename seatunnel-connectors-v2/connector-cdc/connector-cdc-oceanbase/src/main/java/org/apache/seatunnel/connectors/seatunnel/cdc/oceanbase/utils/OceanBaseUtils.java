@@ -20,8 +20,9 @@ package org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.exception.OceanBaseConnectorException;
+import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
 
-import com.oceanbase.clogproxy.client.config.ClientConf;
+import com.oceanbase.clogproxy.client.LogProxyClient;
 import com.oceanbase.clogproxy.client.config.ObReaderConfig;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.TableId;
@@ -42,89 +43,6 @@ import static org.apache.seatunnel.connectors.cdc.base.utils.SourceRecordUtils.r
 
 @Slf4j
 public class OceanBaseUtils {
-
-    /** Create OceanBase LogProxy client configuration */
-    public static ClientConf buildClientConfig(OceanBaseSourceConfig sourceConfig) {
-        ClientConf clientConf =
-                ClientConf.builder()
-                        .transferQueueSize(1024)
-                        .connectTimeoutMs(sourceConfig.getConnectTimeoutMs())
-                        .maxReconnectTimes(10)
-                        .ignoreUnknownRecordType(true)
-                        .build();
-
-        return clientConf;
-    }
-
-    /** Create OceanBase reader configuration */
-    public static ObReaderConfig buildObReaderConfig(OceanBaseSourceConfig sourceConfig) {
-        ObReaderConfig obReaderConfig = new ObReaderConfig();
-
-        // Set cluster configuration
-        if (sourceConfig.getClusterUrl() != null && !sourceConfig.getClusterUrl().isEmpty()) {
-            obReaderConfig.setClusterUrl(sourceConfig.getClusterUrl());
-        } else if (sourceConfig.getRsList() != null && !sourceConfig.getRsList().isEmpty()) {
-            obReaderConfig.setRsList(sourceConfig.getRsList());
-        }
-
-        // Set credentials
-        obReaderConfig.setUsername(sourceConfig.getUsername());
-        obReaderConfig.setPassword(sourceConfig.getPassword());
-
-        // Set system tenant credentials if provided
-        if (sourceConfig.getSysUsername() != null && !sourceConfig.getSysUsername().isEmpty()) {
-            obReaderConfig.setSysUsername(sourceConfig.getSysUsername());
-        }
-        if (sourceConfig.getSysPassword() != null && !sourceConfig.getSysPassword().isEmpty()) {
-            obReaderConfig.setSysPassword(sourceConfig.getSysPassword());
-        }
-
-        // Set table filter
-        String tableWhiteList = buildTableWhiteList(sourceConfig);
-        obReaderConfig.setTableWhiteList(tableWhiteList);
-
-        // Set working mode
-        if (sourceConfig.getWorkingMode() != null) {
-            obReaderConfig.setWorkingMode(sourceConfig.getWorkingMode());
-        }
-
-        // Set timezone - directly use the string format from config
-        if (sourceConfig.getServerTimeZone() != null) {
-            obReaderConfig.setTimezone(sourceConfig.getServerTimeZone());
-        }
-
-        return obReaderConfig;
-    }
-
-    /** Build table whitelist from source config */
-    private static String buildTableWhiteList(OceanBaseSourceConfig sourceConfig) {
-        StringBuilder whitelist = new StringBuilder();
-        String tenantName = sourceConfig.getTenantName();
-
-        if (sourceConfig.getTableList() != null && !sourceConfig.getTableList().isEmpty()) {
-            for (String tablePattern : sourceConfig.getTableList()) {
-                String[] parts = tablePattern.split("\\.");
-                if (parts.length == 2) {
-                    String database = parts[0];
-                    String table = parts[1];
-                    whitelist
-                            .append(tenantName)
-                            .append(".")
-                            .append(database)
-                            .append(".")
-                            .append(table)
-                            .append("|");
-                }
-            }
-            if (whitelist.length() > 0) {
-                return whitelist.substring(0, whitelist.length() - 1);
-            }
-        }
-
-        // Default to all tables in the tenant
-        return tenantName + ".*.*";
-    }
-
     /** Create JDBC connection to OceanBase */
     public static Connection createJdbcConnection(OceanBaseSourceConfig sourceConfig) {
         try {
@@ -144,6 +62,93 @@ public class OceanBaseUtils {
             throw new OceanBaseConnectorException(
                     ILLEGAL_ARGUMENT, "Failed to create JDBC connection");
         }
+    }
+
+    /** Build ObReaderConfig for LogProxyClient */
+    private static ObReaderConfig buildObReaderConfig(
+            OceanBaseSourceConfig sourceConfig, OceanBaseOffset startOffset) {
+        ObReaderConfig obReaderConfig = new ObReaderConfig();
+
+        // Set cluster configuration
+        if (sourceConfig.getClusterUrl() != null && !sourceConfig.getClusterUrl().isEmpty()) {
+            obReaderConfig.setClusterUrl(sourceConfig.getClusterUrl());
+        } else if (sourceConfig.getRootServerList() != null
+                && !sourceConfig.getRootServerList().isEmpty()) {
+            obReaderConfig.setRsList(sourceConfig.getRootServerList());
+        }
+
+        // Set credentials
+        obReaderConfig.setUsername(sourceConfig.getUsername());
+        obReaderConfig.setPassword(sourceConfig.getPassword());
+
+        // Set system tenant credentials if provided
+        if (sourceConfig.getSysUsername() != null && !sourceConfig.getSysUsername().isEmpty()) {
+            obReaderConfig.setSysUsername(sourceConfig.getSysUsername());
+        }
+        if (sourceConfig.getSysPassword() != null && !sourceConfig.getSysPassword().isEmpty()) {
+            obReaderConfig.setSysPassword(sourceConfig.getSysPassword());
+        }
+
+        // Set table filter
+        obReaderConfig.setTableWhiteList(sourceConfig.getWhiteTableList());
+        obReaderConfig.setTableBlackList(sourceConfig.getBlackTableList());
+
+        // Set working mode
+        if (sourceConfig.getWorkingMode() != null) {
+            obReaderConfig.setWorkingMode(sourceConfig.getWorkingMode());
+        }
+
+        // Set timezone
+        if (sourceConfig.getServerTimeZone() != null) {
+            obReaderConfig.setTimezone(sourceConfig.getServerTimeZone());
+        }
+
+        if (sourceConfig.getClusterId() != null) {
+            obReaderConfig.setClusterId(sourceConfig.getClusterId());
+        }
+
+        // Set start timestamp if provided
+        if (startOffset != null && startOffset.getTimestamp() > 0) {
+            obReaderConfig.setStartTimestamp(startOffset.getTimestamp());
+            log.info("Set LogProxy start timestamp: {}", startOffset.getTimestamp());
+        } else if (sourceConfig.getStartTimestamp() != null) {
+            obReaderConfig.setStartTimestamp(sourceConfig.getStartTimestamp());
+            log.info(
+                    "Set LogProxy start timestamp from config: {}",
+                    sourceConfig.getStartTimestamp());
+        } else if (sourceConfig.getStartTimestampUS() != null) {
+            obReaderConfig.setStartTimestampUs(sourceConfig.getStartTimestampUS());
+            log.info(
+                    "Set LogProxy start timestamp us from config: {}",
+                    sourceConfig.getStartTimestampUS());
+        }
+
+        return obReaderConfig;
+    }
+
+    /**
+     * Create a new LogProxyClient instance
+     *
+     * @param startOffset Starting offset for LogProxy
+     * @return LogProxyClient instance
+     */
+    public static LogProxyClient createLogProxyClient(
+            OceanBaseSourceConfig sourceConfig, OceanBaseOffset startOffset) {
+        log.info("Creating LogProxyClient with start offset: {}", startOffset);
+
+        // Build ObReader configuration
+        ObReaderConfig obReaderConfig =
+                OceanBaseUtils.buildObReaderConfig(sourceConfig, startOffset);
+
+        // Create LogProxyClient
+        LogProxyClient client =
+                new LogProxyClient(
+                        sourceConfig.getLogproxyHost(),
+                        sourceConfig.getLogproxyPort(),
+                        obReaderConfig);
+
+        log.info("LogProxyClient created successfully");
+        return client;
     }
 
     /** Parse table identifier from database and table name */

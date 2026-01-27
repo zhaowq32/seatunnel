@@ -23,13 +23,9 @@ import org.apache.seatunnel.connectors.cdc.base.source.split.SourceSplitBase;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.dialect.OceanBaseDialect;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
-import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUtils;
 
 import org.apache.kafka.connect.source.SourceRecord;
 
-import com.oceanbase.clogproxy.client.LogProxyClient;
-import com.oceanbase.clogproxy.client.config.ClientConf;
-import com.oceanbase.clogproxy.client.config.ObReaderConfig;
 import io.debezium.connector.base.ChangeEventQueue;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.relational.TableId;
@@ -53,7 +49,6 @@ public class OceanBaseFetchTaskContext implements FetchTask.Context {
     @Getter private final OceanBaseDialect dialect;
     @Getter private final OceanBaseSourceConfig sourceConfig;
     private ChangeEventQueue<DataChangeEvent> changeEventQueue;
-    private LogProxyClient logProxyClient;
 
     public OceanBaseFetchTaskContext(OceanBaseDialect dialect, OceanBaseSourceConfig sourceConfig) {
         this.dialect = dialect;
@@ -83,93 +78,6 @@ public class OceanBaseFetchTaskContext implements FetchTask.Context {
 
     public ChangeEventQueue<DataChangeEvent> getQueue() {
         return changeEventQueue;
-    }
-
-    /**
-     * Create a new LogProxyClient instance
-     *
-     * @param startOffset Starting offset for LogProxy
-     * @return LogProxyClient instance
-     */
-    public LogProxyClient createLogProxyClient(OceanBaseOffset startOffset) {
-        log.info("Creating LogProxyClient with start offset: {}", startOffset);
-
-        // Build client configuration
-        ClientConf clientConf = OceanBaseUtils.buildClientConfig(sourceConfig);
-
-        // Build ObReader configuration
-        ObReaderConfig obReaderConfig = buildObReaderConfig(startOffset);
-
-        // Create LogProxyClient
-        LogProxyClient client =
-                new LogProxyClient(
-                        sourceConfig.getLogproxyHost(),
-                        sourceConfig.getLogproxyPort(),
-                        obReaderConfig,
-                        clientConf);
-
-        log.info("LogProxyClient created successfully");
-        return client;
-    }
-
-    /** Build ObReaderConfig for LogProxyClient */
-    private ObReaderConfig buildObReaderConfig(OceanBaseOffset startOffset) {
-        ObReaderConfig obReaderConfig = new ObReaderConfig();
-
-        // Set cluster configuration
-        if (sourceConfig.getClusterUrl() != null && !sourceConfig.getClusterUrl().isEmpty()) {
-            obReaderConfig.setClusterUrl(sourceConfig.getClusterUrl());
-        } else if (sourceConfig.getRootServerList() != null && !sourceConfig.getRootServerList().isEmpty()) {
-            obReaderConfig.setRsList(sourceConfig.getRootServerList());
-        }
-
-        // Set credentials
-        obReaderConfig.setUsername(sourceConfig.getUsername());
-        obReaderConfig.setPassword(sourceConfig.getPassword());
-
-        // Set system tenant credentials if provided
-        if (sourceConfig.getSysUsername() != null && !sourceConfig.getSysUsername().isEmpty()) {
-            obReaderConfig.setSysUsername(sourceConfig.getSysUsername());
-        }
-        if (sourceConfig.getSysPassword() != null && !sourceConfig.getSysPassword().isEmpty()) {
-            obReaderConfig.setSysPassword(sourceConfig.getSysPassword());
-        }
-
-        // Set table filter
-        obReaderConfig.setTableWhiteList(sourceConfig.getWhiteTableList());
-        obReaderConfig.setTableBlackList(sourceConfig.getBlackTableList());
-
-        // Set working mode
-        if (sourceConfig.getWorkingMode() != null) {
-            obReaderConfig.setWorkingMode(sourceConfig.getWorkingMode());
-        }
-
-        // Set timezone
-        if (sourceConfig.getServerTimeZone() != null) {
-            obReaderConfig.setTimezone(sourceConfig.getServerTimeZone());
-        }
-
-        if (sourceConfig.getClusterId() != null) {
-            obReaderConfig.setClusterId(sourceConfig.getClusterId());
-        }
-
-        // Set start timestamp if provided
-        if (startOffset != null && startOffset.getTimestamp() > 0) {
-            obReaderConfig.setStartTimestamp(startOffset.getTimestamp());
-            log.info("Set LogProxy start timestamp: {}", startOffset.getTimestamp());
-        } else if (sourceConfig.getStartTimestamp() != null) {
-            obReaderConfig.setStartTimestamp(sourceConfig.getStartTimestamp());
-            log.info(
-                    "Set LogProxy start timestamp from config: {}",
-                    sourceConfig.getStartTimestamp());
-        } else if (sourceConfig.getStartTimestampUS() != null) {
-            obReaderConfig.setStartTimestampUs(sourceConfig.getStartTimestampUS());
-            log.info(
-                    "Set LogProxy start timestamp us from config: {}",
-                    sourceConfig.getStartTimestampUS());
-        }
-
-        return obReaderConfig;
     }
 
     @Override
@@ -313,16 +221,8 @@ public class OceanBaseFetchTaskContext implements FetchTask.Context {
         return null;
     }
 
+    @Override
     public void close() {
-        // Cleanup LogProxyClient
-        if (logProxyClient != null) {
-            try {
-                log.info("Stopping LogProxyClient");
-                logProxyClient.stop();
-                logProxyClient = null;
-            } catch (Exception e) {
-                log.warn("Failed to stop LogProxy client", e);
-            }
-        }
+        log.info("Stopping OceanBaseFetchTaskContext");
     }
 }

@@ -24,6 +24,7 @@ import org.apache.seatunnel.connectors.cdc.base.source.split.wartermark.Watermar
 import org.apache.seatunnel.connectors.cdc.base.source.split.wartermark.WatermarkKind;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
+import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUtils;
 
 import org.apache.kafka.connect.source.SourceRecord;
 
@@ -46,8 +47,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
 
     private final IncrementalSplit incrementalSplit;
     private volatile boolean taskRunning = false;
-    private static final int MAX_RETRIES = 3;
-    private static final long INITIAL_RETRY_DELAY_MS = 1000L;
+    private LogProxyClient logProxyClient;
 
     public OceanBaseStreamFetchTask(IncrementalSplit incrementalSplit) {
         this.incrementalSplit = incrementalSplit;
@@ -56,7 +56,6 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
     @Override
     public void execute(Context context) throws Exception {
         OceanBaseFetchTaskContext taskContext = (OceanBaseFetchTaskContext) context;
-        OceanBaseSourceConfig sourceConfig = taskContext.getSourceConfig();
         ChangeEventQueue<DataChangeEvent> changeEventQueue = taskContext.getQueue();
 
         taskRunning = true;
@@ -86,7 +85,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                     "Execute stream read subtask for OceanBase split {} fail", incrementalSplit, e);
             throw e;
         } finally {
-            shutdown(taskContext);
+            taskRunning = false;
         }
     }
 
@@ -103,7 +102,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
 
         try {
             // Get or create LogProxy client from context
-            LogProxyClient logProxyClient = taskContext.createLogProxyClient(startOffset);
+            logProxyClient = OceanBaseUtils.createLogProxyClient(sourceConfig, startOffset);
 
             // Add record listener to handle incoming log messages
             logProxyClient.addListener(
@@ -132,7 +131,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                                         && currentOffset.getTimestamp()
                                                 >= stopOffset.getTimestamp()) {
                                     log.info("Reached stop offset {}", stopOffset);
-                                    shutdown(taskContext);
+                                    shutdown();
                                     return;
                                 }
 
@@ -171,7 +170,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                                 }
                             }
                             // Shutdown task on critical exception
-                            shutdown(taskContext);
+                            shutdown();
                         }
                     });
 
@@ -180,19 +179,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
 
             log.info("LogProxy client started successfully for split {}", incrementalSplit);
 
-            // Wait for the client to run with efficient waiting mechanism
-            synchronized (this) {
-                while (taskRunning) {
-                    try {
-                        // Wait indefinitely until notified
-                        this.wait();
-                    } catch (InterruptedException e) {
-                        log.info("Stream reading interrupted for split {}", incrementalSplit);
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
+            logProxyClient.join();
 
             // Emit END watermark for all tables
             log.info("Stream reading completed for split {}", incrementalSplit);
@@ -210,6 +197,8 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
         } catch (Exception e) {
             log.error("Error during LogProxy client execution", e);
             throw e;
+        } finally {
+            shutdown();
         }
     }
 
@@ -256,7 +245,6 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
             Map<String, Object> sourceMetadata = new HashMap<>();
             sourceMetadata.put("version", "1.0.0");
             sourceMetadata.put("connector", "oceanbase");
-            sourceMetadata.put("name", sourceConfig.getTenantName());
             sourceMetadata.put("ts_ms", timestampMs);
             sourceMetadata.put("snapshot", "false");
             sourceMetadata.put("db", logMessage.getDbName());
@@ -470,31 +458,21 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
 
     @Override
     public void shutdown() {
-        synchronized (this) {
-            taskRunning = false;
-            // Notify waiting thread to exit
-            this.notifyAll();
+        // Cleanup LogProxyClient
+        if (logProxyClient != null) {
+            try {
+                log.info("Stopping LogProxyClient");
+                logProxyClient.stop();
+                logProxyClient = null;
+            } catch (Exception e) {
+                log.warn("Failed to stop LogProxy client", e);
+            }
         }
+        taskRunning = false;
     }
 
     @Override
     public SourceSplitBase getSplit() {
         return incrementalSplit;
-    }
-
-    /**
-     * Shutdown the fetch task
-     *
-     * @param taskContext Context to clean up, can be null
-     */
-    private void shutdown(OceanBaseFetchTaskContext taskContext) {
-        synchronized (this) {
-            taskRunning = false;
-            // Notify waiting thread to exit
-            this.notifyAll();
-        }
-        // LogProxyClient is now managed by taskContext
-        // Do not stop it here directly
-        log.info("OceanBaseStreamFetchTask shutdown called");
     }
 }
