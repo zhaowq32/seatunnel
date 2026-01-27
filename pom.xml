@@ -169,6 +169,7 @@
         <software.amazon.awssdk.version>2.31.30</software.amazon.awssdk.version>
         <arrow.version>15.0.1</arrow.version>
         <okhttp.version>4.12.0</okhttp.version>
+        <parquet.version>1.13.1</parquet.version>
 
     </properties>
 
@@ -339,6 +340,18 @@
                 <artifactId>mockwebserver</artifactId>
                 <version>${okhttp.version}</version>
                 <scope>test</scope>
+            </dependency>
+
+            <!-- Parquet dependencies -->
+            <dependency>
+                <groupId>org.apache.parquet</groupId>
+                <artifactId>parquet-avro</artifactId>
+                <version>${parquet.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.parquet</groupId>
+                <artifactId>parquet-hadoop</artifactId>
+                <version>${parquet.version}</version>
             </dependency>
 
             <dependency>
@@ -1052,6 +1065,15 @@
     </issueManagement>
 
     <profiles>
+        <profile>
+            <id>java9+</id>
+            <activation>
+                <jdk>[9,)</jdk>
+            </activation>
+            <properties>
+                <argLine>-Dfile.encoding=UTF-8 --add-opens=java.base/java.net=ALL-UNNAMED</argLine>
+            </properties>
+        </profile>
         <profile>
             <id>release</id>
             <activation>
