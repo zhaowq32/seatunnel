@@ -26,14 +26,19 @@ import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseS
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUtils;
 
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import com.oceanbase.clogproxy.client.LogProxyClient;
 import com.oceanbase.clogproxy.client.listener.RecordListener;
 import com.oceanbase.oms.logmessage.LogMessage;
 import io.debezium.connector.base.ChangeEventQueue;
+import io.debezium.data.Envelope;
 import io.debezium.pipeline.DataChangeEvent;
 import io.debezium.relational.TableId;
+import io.debezium.util.SchemaNameAdjuster;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -44,6 +49,42 @@ import java.util.Map;
 /** OceanBase stream fetch task for incremental reading via LogProxy. */
 @Slf4j
 public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
+
+    private static final SchemaNameAdjuster SCHEMA_NAME_ADJUSTER = SchemaNameAdjuster.create();
+
+    // Debezium source schema for OceanBase
+    private static final Schema SOURCE_SCHEMA =
+            SchemaBuilder.struct()
+                    .name(
+                            SCHEMA_NAME_ADJUSTER.adjust(
+                                    "org.apache.seatunnel.connectors.oceanbase.Source"))
+                    .field("version", Schema.STRING_SCHEMA)
+                    .field("connector", Schema.STRING_SCHEMA)
+                    .field("snapshot", Schema.STRING_SCHEMA)
+                    .field("db", Schema.STRING_SCHEMA)
+                    .field("table", Schema.STRING_SCHEMA)
+                    .field("ts_ms", Schema.INT64_SCHEMA)
+                    .field("checkpoint", Schema.OPTIONAL_STRING_SCHEMA)
+                    .build();
+
+    /**
+     * Create Debezium envelope schema with dynamic before/after schemas
+     *
+     * @param rowSchema Schema for the row data (before/after fields)
+     * @return Envelope schema
+     */
+    private static Schema createEnvelopeSchema(Schema rowSchema) {
+        return SchemaBuilder.struct()
+                .name(
+                        SCHEMA_NAME_ADJUSTER.adjust(
+                                "org.apache.seatunnel.connectors.oceanbase.Envelope"))
+                .field(Envelope.FieldName.OPERATION, Schema.STRING_SCHEMA)
+                .field(Envelope.FieldName.SOURCE, SOURCE_SCHEMA)
+                .field(Envelope.FieldName.BEFORE, rowSchema)
+                .field(Envelope.FieldName.AFTER, rowSchema)
+                .field(Envelope.FieldName.TIMESTAMP, Schema.OPTIONAL_INT64_SCHEMA)
+                .build();
+    }
 
     private final IncrementalSplit incrementalSplit;
     private volatile boolean taskRunning = false;
@@ -236,12 +277,14 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
             OceanBaseSourceConfig sourceConfig, TableId tableId, LogMessage logMessage) {
 
         try {
-            String operation = logMessage.getOpt().toString();
+            // Parse LogMessage into OceanBaseCDCRecord to properly separate before/after values
+            OceanBaseCDCRecord cdcRecord = new OceanBaseCDCRecord(logMessage);
+            String operation = cdcRecord.getType().toString();
 
             // Build partition map (source partition)
             Map<String, String> partitionMap = new HashMap<>();
-            partitionMap.put("database", logMessage.getDbName());
-            partitionMap.put("table", logMessage.getTableName());
+            partitionMap.put("database", cdcRecord.getDatabase());
+            partitionMap.put("table", cdcRecord.getTable());
 
             // Build offset map
             Map<String, Object> offsetMap = new HashMap<>();
@@ -251,22 +294,29 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                 offsetMap.put("safe_timestamp", logMessage.getSafeTimestamp());
             }
 
-            // Build Debezium source metadata
-            Map<String, Object> sourceMetadata = new HashMap<>();
-            sourceMetadata.put("version", "1.0.0");
-            sourceMetadata.put("connector", "oceanbase");
-            sourceMetadata.put("snapshot", "false");
-            sourceMetadata.put("db", logMessage.getDbName());
-            sourceMetadata.put("table", logMessage.getTableName());
-            if (logMessage.getCheckpoint() != null) {
-                sourceMetadata.put("checkpoint", logMessage.getCheckpoint());
-            }
+            // Build Debezium source metadata as Struct
+            Long timestampMs = cdcRecord.getTimestamp() * 1000; // Convert seconds to milliseconds
+            Struct sourceStruct =
+                    new Struct(SOURCE_SCHEMA)
+                            .put("version", "1.0.0")
+                            .put("connector", "oceanbase")
+                            .put("snapshot", "false")
+                            .put("db", cdcRecord.getDatabase())
+                            .put("table", cdcRecord.getTable())
+                            .put("ts_ms", timestampMs)
+                            .put(
+                                    "checkpoint",
+                                    logMessage.getCheckpoint() != null
+                                            ? logMessage.getCheckpoint()
+                                            : null);
 
-            // Extract field data from LogMessage
-            Map<String, Object> beforeData = extractFieldDataFromLogMessage(logMessage, true);
-            Map<String, Object> afterData = extractFieldDataFromLogMessage(logMessage, false);
+            // Extract field data using OceanBaseCDCRecord which correctly separates before/after
+            Map<String, Object> beforeData =
+                    OceanBaseCDCRecord.toValueMap(cdcRecord.getFieldsBefore());
+            Map<String, Object> afterData =
+                    OceanBaseCDCRecord.toValueMap(cdcRecord.getFieldsAfter());
 
-            // Build key (primary key fields)
+            // Build key (primary key fields) - keep as Map for schemaless
             Map<String, Object> key = new HashMap<>();
             // Use after data for key, fallback to before for DELETE
             if (afterData != null && !afterData.isEmpty()) {
@@ -275,26 +325,27 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                 key.putAll(beforeData);
             }
 
-            // Build Debezium envelope
-            Map<String, Object> envelope = new HashMap<>();
+            // Build row schema from OceanBaseCDCRecord fields
+            Schema rowSchema = createRowSchema(tableId, cdcRecord);
 
-            // Map operation type to Debezium operation
+            // Map operation type to Debezium operation and build before/after Structs
             String debeziumOp;
+            Struct beforeStruct = null;
+            Struct afterStruct = null;
+
             switch (operation.toUpperCase()) {
                 case "INSERT":
-                    debeziumOp = "c"; // create
-                    envelope.put("before", null);
-                    envelope.put("after", afterData);
+                    debeziumOp = Envelope.Operation.CREATE.code();
+                    afterStruct = createRowStruct(rowSchema, afterData);
                     break;
                 case "UPDATE":
-                    debeziumOp = "u"; // update
-                    envelope.put("before", beforeData);
-                    envelope.put("after", afterData);
+                    debeziumOp = Envelope.Operation.UPDATE.code();
+                    beforeStruct = createRowStruct(rowSchema, beforeData);
+                    afterStruct = createRowStruct(rowSchema, afterData);
                     break;
                 case "DELETE":
-                    debeziumOp = "d"; // delete
-                    envelope.put("before", beforeData);
-                    envelope.put("after", null);
+                    debeziumOp = Envelope.Operation.DELETE.code();
+                    beforeStruct = createRowStruct(rowSchema, beforeData);
                     break;
                 case "BEGIN":
                 case "COMMIT":
@@ -306,18 +357,25 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                     return null;
             }
 
-            envelope.put("op", debeziumOp);
-            envelope.put("source", sourceMetadata);
+            // Build Debezium envelope as Struct
+            Schema envelopeSchema = createEnvelopeSchema(rowSchema);
+            Struct envelope =
+                    new Struct(envelopeSchema)
+                            .put(Envelope.FieldName.OPERATION, debeziumOp)
+                            .put(Envelope.FieldName.SOURCE, sourceStruct)
+                            .put(Envelope.FieldName.BEFORE, beforeStruct)
+                            .put(Envelope.FieldName.AFTER, afterStruct)
+                            .put(Envelope.FieldName.TIMESTAMP, timestampMs);
 
-            // Create SourceRecord with complete Debezium format
+            // Create SourceRecord with Schema and Struct
             return new SourceRecord(
                     partitionMap,
                     offsetMap,
                     tableId.toString(), // topic
                     null, // key schema (schemaless mode)
                     key,
-                    null, // value schema (schemaless mode)
-                    envelope);
+                    envelopeSchema, // value schema
+                    envelope); // value as Struct
 
         } catch (Exception e) {
             log.warn("Failed to convert LogMessage to SourceRecord for table {}", tableId, e);
@@ -326,75 +384,62 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
     }
 
     /**
-     * Extract field data from LogMessage
+     * Create row schema from OceanBaseCDCRecord fields All fields are treated as optional strings
+     * for simplicity
      *
-     * @param logMessage LogMessage to extract data from
-     * @param extractBefore true to extract before image (old values), false for after image
-     * @return Map of field name to value
+     * @param tableId Table identifier
+     * @param cdcRecord OceanBaseCDCRecord containing field definitions
+     * @return Row schema
      */
-    private Map<String, Object> extractFieldDataFromLogMessage(
-            LogMessage logMessage, boolean extractBefore) {
-        if (logMessage == null) {
-            return null;
+    private Schema createRowSchema(TableId tableId, OceanBaseCDCRecord cdcRecord) {
+        SchemaBuilder builder =
+                SchemaBuilder.struct()
+                        .optional()
+                        .name(
+                                SCHEMA_NAME_ADJUSTER.adjust(
+                                        "org.apache.seatunnel.connectors.oceanbase.Data."
+                                                + tableId.table()));
+
+        // Collect all unique field names from both before and after maps
+        // No need to worry about duplicates as we use Map keys
+        java.util.Set<String> fieldNames = new java.util.HashSet<>();
+        fieldNames.addAll(cdcRecord.getFieldsBefore().keySet());
+        fieldNames.addAll(cdcRecord.getFieldsAfter().keySet());
+
+        // Add all fields to schema
+        for (String fieldName : fieldNames) {
+            // All fields are optional strings for now
+            // A more complete implementation would map field types properly
+            builder.field(fieldName, Schema.OPTIONAL_STRING_SCHEMA);
         }
 
-        try {
-            Map<String, Object> data = new HashMap<>();
-
-            // Get field list from LogMessage
-            java.util.List<com.oceanbase.oms.logmessage.DataMessage.Record.Field> fields =
-                    logMessage.getFieldList();
-
-            if (fields == null || fields.isEmpty()) {
-                return null;
-            }
-
-            // Extract field values
-            for (com.oceanbase.oms.logmessage.DataMessage.Record.Field field : fields) {
-                if (field != null) {
-                    String fieldName = field.getFieldname();
-                    // For UPDATE operations, before image might be in old values
-                    // This is a simplified approach - actual implementation might need
-                    // to check field.isPrev() or similar method
-                    Object fieldValue = parseFieldValueFromLogMessage(field);
-                    data.put(fieldName, fieldValue);
-                }
-            }
-
-            return data;
-        } catch (Exception e) {
-            log.warn("Failed to extract field data from LogMessage", e);
-            return null;
-        }
+        return builder.build();
     }
 
     /**
-     * Parse field value from LogMessage Field Note: This is a simplified implementation that treats
-     * all values as strings A complete implementation should handle type conversions based on field
-     * metadata
+     * Create Struct from row data
+     *
+     * @param schema Row schema
+     * @param data Row data
+     * @return Struct representing the row, or null if data is empty
      */
-    private Object parseFieldValueFromLogMessage(
-            com.oceanbase.oms.logmessage.DataMessage.Record.Field field) {
-        if (field == null) {
+    private Struct createRowStruct(Schema schema, Map<String, Object> data) {
+        if (data == null || data.isEmpty()) {
             return null;
         }
 
-        try {
-            // Get the string value from the field
-            // The actual field API might be different, adjust as needed
-            Object value = field.getValue();
-
-            if (value == null) {
-                return null;
+        Struct struct = new Struct(schema);
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            String fieldName = entry.getKey();
+            Object value = entry.getValue();
+            // Set field value if it exists in schema
+            if (schema.field(fieldName) != null) {
+                // Convert value to string as per schema definition
+                String stringValue = value != null ? value.toString() : null;
+                struct.put(fieldName, stringValue);
             }
-
-            // For now, return as string - a complete implementation would
-            // convert to proper types based on field.getType() or similar metadata
-            return value.toString();
-        } catch (Exception e) {
-            log.warn("Failed to parse field value", e);
-            return null;
         }
+        return struct;
     }
 
     /**
