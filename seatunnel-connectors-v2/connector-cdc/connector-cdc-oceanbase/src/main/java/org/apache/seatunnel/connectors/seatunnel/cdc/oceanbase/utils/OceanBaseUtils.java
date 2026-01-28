@@ -87,12 +87,42 @@ public class OceanBaseUtils {
         }
     }
 
-    /** Build ObReaderConfig for LogProxyClient */
+    /**
+     * 构建 LogProxyClient 所需的 ObReaderConfig
+     *
+     * <p>此方法是 LogProxyClient 配置的核心，负责从 OceanBaseSourceConfig 中提取配置项 并构建 ObReaderConfig 对象，用于初始化
+     * LogProxyClient。
+     *
+     * <p><strong>配置优先级</strong>:
+     *
+     * <ol>
+     *   <li>集群配置: cluster_url > root_server_list
+     *   <li>时间戳配置: startOffset.timestamp > sourceConfig.startTimestamp >
+     *       sourceConfig.startTimestampUS
+     * </ol>
+     *
+     * <p><strong>核心配置项</strong>:
+     *
+     * <ul>
+     *   <li>集群配置 (cluster_url 或 root_server_list)
+     *   <li>数据库 credentials (username, password)
+     *   <li>系统租户 credentials (sys_username, sys_password)
+     *   <li>表过滤器 (white_table_list, black_table_list)
+     *   <li>工作模式 (working_mode)
+     *   <li>时区 (server_time_zone)
+     *   <li>集群 ID (cluster_id)
+     *   <li>启动时间戳 (start_timestamp)
+     * </ul>
+     *
+     * @param sourceConfig 数据源配置，包含所有必要的连接和过滤信息
+     * @param startOffset 起始偏移量，用于确定从哪个时间点开始读取
+     * @return 构建好的 ObReaderConfig 对象
+     */
     private static ObReaderConfig buildObReaderConfig(
             OceanBaseSourceConfig sourceConfig, OceanBaseOffset startOffset) {
         ObReaderConfig obReaderConfig = new ObReaderConfig();
 
-        // Set cluster configuration
+        // 设置集群配置
         if (sourceConfig.getClusterUrl() != null && !sourceConfig.getClusterUrl().isEmpty()) {
             obReaderConfig.setClusterUrl(sourceConfig.getClusterUrl());
         } else if (sourceConfig.getRootServerList() != null
@@ -100,11 +130,11 @@ public class OceanBaseUtils {
             obReaderConfig.setRsList(sourceConfig.getRootServerList());
         }
 
-        // Set credentials
+        // 设置数据库凭证
         obReaderConfig.setUsername(sourceConfig.getUsername());
         obReaderConfig.setPassword(sourceConfig.getPassword());
 
-        // Set system tenant credentials if provided
+        // 如果提供了系统租户凭证，则设置
         if (sourceConfig.getSysUsername() != null && !sourceConfig.getSysUsername().isEmpty()) {
             obReaderConfig.setSysUsername(sourceConfig.getSysUsername());
         }
@@ -112,28 +142,29 @@ public class OceanBaseUtils {
             obReaderConfig.setSysPassword(sourceConfig.getSysPassword());
         }
 
-        // Set table filter
+        // 设置表过滤器
         obReaderConfig.setTableWhiteList(sourceConfig.getWhiteTableList());
         if (sourceConfig.getBlackTableList() != null
                 && !sourceConfig.getBlackTableList().isEmpty()) {
             obReaderConfig.setTableBlackList(sourceConfig.getBlackTableList());
         }
 
-        // Set working mode
+        // 设置工作模式
         if (sourceConfig.getWorkingMode() != null) {
             obReaderConfig.setWorkingMode(sourceConfig.getWorkingMode());
         }
 
-        // Set timezone
+        // 设置时区
         if (sourceConfig.getServerTimeZone() != null) {
             obReaderConfig.setTimezone(sourceConfig.getServerTimeZone());
         }
 
+        // 设置集群 ID
         if (sourceConfig.getClusterId() != null) {
             obReaderConfig.setClusterId(sourceConfig.getClusterId());
         }
 
-        // Set start timestamp if provided
+        // 设置启动时间戳（按优先级）
         if (startOffset != null && startOffset.getTimestamp() > 0) {
             obReaderConfig.setStartTimestamp(startOffset.getTimestamp());
             log.info("Set LogProxy start timestamp: {}", startOffset.getTimestamp());
@@ -153,20 +184,37 @@ public class OceanBaseUtils {
     }
 
     /**
-     * Create a new LogProxyClient instance
+     * 创建新的 LogProxyClient 实例
      *
-     * @param startOffset Starting offset for LogProxy
-     * @return LogProxyClient instance
+     * <p>此方法是 LogProxyClient 创建的入口点，负责：
+     *
+     * <ol>
+     *   <li>构建 ObReaderConfig 配置对象
+     *   <li>使用配置创建 LogProxyClient 实例
+     *   <li>记录创建过程的日志
+     * </ol>
+     *
+     * <p><strong>重要说明</strong>:
+     *
+     * <ul>
+     *   <li>LogProxyClient 是与 OceanBase 集群通信的核心组件
+     *   <li>创建的 client 实例需要在使用完成后调用 stop() 方法关闭
+     *   <li>此方法只负责创建实例，不负责启动 client
+     * </ul>
+     *
+     * @param sourceConfig 数据源配置，包含 LogProxy 连接信息和 OceanBase 配置
+     * @param startOffset 起始偏移量，用于确定从哪个时间点开始读取数据
+     * @return 创建好的 LogProxyClient 实例
      */
     public static LogProxyClient createLogProxyClient(
             OceanBaseSourceConfig sourceConfig, OceanBaseOffset startOffset) {
         log.info("Creating LogProxyClient with start offset: {}", startOffset);
 
-        // Build ObReader configuration
+        // 构建 ObReader 配置
         ObReaderConfig obReaderConfig =
                 OceanBaseUtils.buildObReaderConfig(sourceConfig, startOffset);
 
-        // Create LogProxyClient
+        // 创建 LogProxyClient
         LogProxyClient client =
                 new LogProxyClient(
                         sourceConfig.getLogProxyHost(),
