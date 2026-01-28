@@ -22,11 +22,8 @@ import org.apache.seatunnel.connectors.cdc.base.source.enumerator.splitter.Chunk
 import org.apache.seatunnel.connectors.cdc.base.source.reader.external.FetchTask;
 import org.apache.seatunnel.connectors.cdc.base.source.split.SourceSplitBase;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
-import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.enumerator.OceanBaseChunkSplitter;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.fetch.OceanBaseFetchTaskContext;
-import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.fetch.OceanBaseScanFetchTask;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.fetch.OceanBaseStreamFetchTask;
-import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUtils;
 
 import io.debezium.relational.TableId;
@@ -114,36 +111,23 @@ public class OceanBaseDialect implements DataSourceDialect<OceanBaseSourceConfig
 
     @Override
     public ChunkSplitter createChunkSplitter(OceanBaseSourceConfig sourceConfig) {
-        return new OceanBaseChunkSplitter(sourceConfig, this);
+        throw new UnsupportedOperationException(
+                "OceanBase CDC only supports streaming mode, snapshot/chunk splitting is not supported");
     }
 
     @Override
     public FetchTask<SourceSplitBase> createFetchTask(@Nonnull SourceSplitBase sourceSplitBase) {
         if (sourceSplitBase.isSnapshotSplit()) {
-            return new OceanBaseScanFetchTask(sourceSplitBase.asSnapshotSplit());
-        } else {
-            return new OceanBaseStreamFetchTask(sourceSplitBase.asIncrementalSplit());
+            throw new UnsupportedOperationException(
+                    "OceanBase CDC only supports streaming mode, snapshot split is not supported");
         }
+        return new OceanBaseStreamFetchTask(sourceSplitBase.asIncrementalSplit());
     }
 
     @Override
     public FetchTask.Context createFetchTaskContext(
             SourceSplitBase sourceSplitBase, OceanBaseSourceConfig sourceConfig) {
         return new OceanBaseFetchTaskContext(this, sourceConfig);
-    }
-
-    /** Display current offset for OceanBase */
-    public OceanBaseOffset displayCurrentOffset() {
-        long currentTimestamp = OceanBaseUtils.getCurrentTimestampSeconds();
-        OceanBaseOffset offset =
-                new OceanBaseOffset(currentTimestamp, String.valueOf(currentTimestamp));
-
-        log.info(
-                "Current OceanBase offset: timestamp={}, checkpoint={}",
-                offset.getTimestamp(),
-                offset.getCheckpoint());
-
-        return offset;
     }
 
     /** Discover tables matching the pattern */

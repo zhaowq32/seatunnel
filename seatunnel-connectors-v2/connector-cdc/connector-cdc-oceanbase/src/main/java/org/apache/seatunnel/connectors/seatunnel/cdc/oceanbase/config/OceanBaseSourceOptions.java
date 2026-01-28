@@ -24,40 +24,39 @@ import org.apache.seatunnel.connectors.cdc.base.option.SourceOptions;
 import org.apache.seatunnel.connectors.cdc.base.option.StartupMode;
 import org.apache.seatunnel.connectors.cdc.base.option.StopMode;
 
-import java.util.Arrays;
 import java.util.Collections;
 
 public class OceanBaseSourceOptions extends SourceOptions {
 
     public static final String DIALECT_NAME = "OceanBase";
 
-    public static final Option<String> JDBC_URL =
-            Options.key("jdbc-url")
+    public static final Option<String> URL =
+            Options.key("url")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("JDBC url of the OceanBase LogProxy server.");
 
-    public static final Option<String> LOGPROXY_HOST =
-            Options.key("logproxy-host")
+    public static final Option<String> LOG_PROXY_HOST =
+            Options.key("log_proxy_host")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Hostname or IP address of OceanBase log proxy service.");
 
-    public static final Option<Integer> LOGPROXY_PORT =
-            Options.key("logproxy-port")
+    public static final Option<Integer> LOG_PROXY_PORT =
+            Options.key("log_proxy_port")
                     .intType()
                     .defaultValue(2983)
                     .withDescription("Port number of OceanBase log proxy service.");
 
     public static final Option<String> CLUSTER_URL =
-            Options.key("cluster-url")
+            Options.key("cluster_url")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "This URL is used to obtain information about OceanBase cluster nodes, and it needs to be configured only when using the enterprise version of OceanBase.");
 
     public static final Option<String> ROOT_SERVER_LIST =
-            Options.key("root-server-list")
+            Options.key("root_server_list")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
@@ -75,82 +74,62 @@ public class OceanBaseSourceOptions extends SourceOptions {
                     .noDefaultValue()
                     .withDescription("Password for connecting to OceanBase.");
 
-    public static final Option<String> WHITE_TABLE_LIST =
-            Options.key("white-table-list")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The whitelist for monitoring data changes uses `fnmatch` to match patterns in the format `tenant.database.table`, with multiple values separated by `|`.");
-
     public static final Option<String> BLACK_TABLE_LIST =
-            Options.key("black-table-list")
+            Options.key("black_table_list")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "The blacklist for monitoring data changes uses `fnmatch` to match patterns in the format `tenant.database.table`, with multiple values separated by `|`.");
 
-    public static final Option<Long> START_TIMESTAMP =
-            Options.key("start-timestamp")
-                    .longType()
-                    .defaultValue(0L)
-                    .withDescription(
-                            "The starting timestamp for data retrieval, in seconds. A value of 0 will start retrieving data from the current time.");
-
     public static final Option<String> SERVER_TIME_ZONE =
-            Options.key("server-time-zone")
+            Options.key("server_time_zone")
                     .stringType()
                     .defaultValue("+08:00")
                     .withDescription(
                             "The time zone used for the connection; this value will affect how time-related fields are read.");
 
     public static final Option<String> WORKING_MODE =
-            Options.key("working-mode")
+            Options.key("working_mode")
                     .stringType()
                     .defaultValue("storage")
                     .withDescription(
                             "The working mode of libobcdc can be set to either \"storage\" or \"memory\".");
 
     public static final Option<Long> START_TIMESTAMP_US =
-            Options.key("start-timestamp-us")
+            Options.key("start_timestamp_us")
                     .longType()
                     .defaultValue(0L)
                     .withDescription(
                             "The starting timestamp for the subscription data, in microseconds. A value of 0 means it will start from the current time.");
 
     public static final Option<String> CLUSTER_ID =
-            Options.key("cluster-id")
+            Options.key("cluster_id")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The cluster ID of the OceanBase cluster.");
 
     public static final Option<String> SYS_USERNAME =
-            Options.key("sys-username")
+            Options.key("sys_username")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "The username of the sys tenant user in the OceanBase cluster..");
 
     public static final Option<String> SYS_PASSWORD =
-            Options.key("sys-password")
+            Options.key("sys_password")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "The password of the sys tenant user in the OceanBase cluster.");
 
-    public static final Option<Integer> SPLIT_SIZE =
-            Options.key("split-size")
-                    .intType()
-                    .defaultValue(10000)
-                    .withDescription("The split size for snapshot reading. Default is 10000.");
-
     public static final Option<Integer> BATCH_SIZE =
-            Options.key("batch-size")
+            Options.key("batch_size")
                     .intType()
                     .defaultValue(1024)
                     .withDescription("The batch size for reading snapshot data. Default is 1024.");
 
     public static final Option<Boolean> EXACTLY_ONCE =
-            Options.key("exactly-once")
+            Options.key("exactly_once")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Enable exactly-once semantic. Default is false.");
@@ -158,13 +137,10 @@ public class OceanBaseSourceOptions extends SourceOptions {
     public static final SingleChoiceOption<StartupMode> STARTUP_MODE =
             Options.key(SourceOptions.STARTUP_MODE_KEY)
                     .singleChoice(
-                            StartupMode.class,
-                            Arrays.asList(
-                                    StartupMode.INITIAL, StartupMode.LATEST, StartupMode.TIMESTAMP))
-                    .defaultValue(StartupMode.INITIAL)
+                            StartupMode.class, Collections.singletonList(StartupMode.TIMESTAMP))
+                    .defaultValue(StartupMode.TIMESTAMP)
                     .withDescription(
-                            "Optional startup mode for CDC source, valid enumerations are "
-                                    + "\"initial\", \"latest\", or \"timestamp\"");
+                            "Optional startup mode for CDC source, valid enumerations are \"timestamp\"");
 
     public static final SingleChoiceOption<StopMode> STOP_MODE =
             Options.key(SourceOptions.STOP_MODE_KEY)

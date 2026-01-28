@@ -30,13 +30,14 @@ public class OceanBaseSourceConfig implements SourceConfig {
 
     private static final long serialVersionUID = 1L;
 
-    private final String jdbcUrl;
-    private final String logproxyHost;
-    private final int logproxyPort;
+    private final String url;
+    private final String logProxyHost;
+    private final int logProxyPort;
     private final String clusterUrl;
     private final String rootServerList;
     private final String username;
     private final String password;
+    private final String tenant;
     private final String whiteTableList;
     private final String blackTableList;
     private final Long startTimestamp;
@@ -46,20 +47,20 @@ public class OceanBaseSourceConfig implements SourceConfig {
     private final String clusterId;
     private final String sysUsername;
     private final String sysPassword;
-    private final int splitSize;
     private final int batchSize;
     private final boolean exactlyOnce;
     private final StartupConfig startupConfig;
     private final StopConfig stopConfig;
 
     public OceanBaseSourceConfig(
-            String jdbcUrl,
-            String logproxyHost,
-            int logproxyPort,
+            String url,
+            String logProxyHost,
+            int logProxyPort,
             String clusterUrl,
             String rootServerList,
             String username,
             String password,
+            String tenant,
             String whiteTableList,
             String blackTableList,
             Long startTimestamp,
@@ -69,18 +70,18 @@ public class OceanBaseSourceConfig implements SourceConfig {
             String clusterId,
             String sysUsername,
             String sysPassword,
-            int splitSize,
             int batchSize,
             boolean exactlyOnce,
             StartupConfig startupConfig,
             StopConfig stopConfig) {
-        this.jdbcUrl = jdbcUrl;
-        this.logproxyHost = logproxyHost;
-        this.logproxyPort = logproxyPort;
+        this.url = url;
+        this.logProxyHost = logProxyHost;
+        this.logProxyPort = logProxyPort;
         this.clusterUrl = clusterUrl;
         this.rootServerList = rootServerList;
         this.username = username;
         this.password = password;
+        this.tenant = tenant;
         this.whiteTableList = whiteTableList;
         this.blackTableList = blackTableList;
         this.startTimestamp = startTimestamp;
@@ -90,7 +91,6 @@ public class OceanBaseSourceConfig implements SourceConfig {
         this.clusterId = clusterId;
         this.sysUsername = sysUsername;
         this.sysPassword = sysPassword;
-        this.splitSize = splitSize;
         this.batchSize = batchSize;
         this.exactlyOnce = exactlyOnce;
         this.startupConfig = startupConfig;
@@ -109,7 +109,8 @@ public class OceanBaseSourceConfig implements SourceConfig {
 
     @Override
     public int getSplitSize() {
-        return splitSize;
+        throw new UnsupportedOperationException(
+                "OceanBase CDC only supports streaming mode, splitSize is not supported");
     }
 
     @Override

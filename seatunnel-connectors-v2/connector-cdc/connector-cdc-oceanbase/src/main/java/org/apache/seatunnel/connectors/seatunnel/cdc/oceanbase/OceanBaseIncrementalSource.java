@@ -19,6 +19,7 @@ package org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase;
 
 import org.apache.seatunnel.api.configuration.Option;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
+import org.apache.seatunnel.api.options.table.CatalogOptions;
 import org.apache.seatunnel.api.source.SupportParallelism;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.connectors.cdc.base.config.SourceConfig;
@@ -29,7 +30,9 @@ import org.apache.seatunnel.connectors.cdc.base.option.StopMode;
 import org.apache.seatunnel.connectors.cdc.base.source.IncrementalSource;
 import org.apache.seatunnel.connectors.cdc.base.source.offset.OffsetFactory;
 import org.apache.seatunnel.connectors.cdc.debezium.DebeziumDeserializationSchema;
+import org.apache.seatunnel.connectors.cdc.debezium.DeserializeFormat;
 import org.apache.seatunnel.connectors.cdc.debezium.row.DebeziumJsonDeserializeSchema;
+import org.apache.seatunnel.connectors.cdc.debezium.row.SeaTunnelRowDebeziumDeserializeSchema;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfigProvider;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions;
@@ -38,6 +41,7 @@ import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.Oce
 
 import javax.annotation.Nonnull;
 
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -71,21 +75,20 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
             @Nonnull ReadonlyConfig config) {
         OceanBaseSourceConfigProvider.Builder builder =
                 OceanBaseSourceConfigProvider.newBuilder()
-                        .jdbcUrl(config.get(OceanBaseSourceOptions.JDBC_URL))
+                        .url(config.get(OceanBaseSourceOptions.URL))
                         .username(config.get(OceanBaseSourceOptions.USERNAME))
                         .password(config.get(OceanBaseSourceOptions.PASSWORD))
-                        .logproxyHost(config.get(OceanBaseSourceOptions.LOGPROXY_HOST))
-                        .logproxyPort(config.get(OceanBaseSourceOptions.LOGPROXY_PORT));
+                        .logProxyHost(config.get(OceanBaseSourceOptions.LOG_PROXY_HOST))
+                        .logProxyPort(config.get(OceanBaseSourceOptions.LOG_PROXY_PORT));
 
         Optional.ofNullable(config.get(OceanBaseSourceOptions.CLUSTER_URL))
                 .ifPresent(builder::clusterUrl);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.ROOT_SERVER_LIST))
                 .ifPresent(builder::rootServerList);
-        Optional.ofNullable(config.get(OceanBaseSourceOptions.WHITE_TABLE_LIST))
-                .ifPresent(builder::whiteTableList);
+        Optional.ofNullable(config.get(CatalogOptions.TABLE_NAMES)).ifPresent(builder::tableNames);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.BLACK_TABLE_LIST))
                 .ifPresent(builder::blackTableList);
-        Optional.ofNullable(config.get(OceanBaseSourceOptions.START_TIMESTAMP))
+        Optional.ofNullable(config.get(OceanBaseSourceOptions.STARTUP_TIMESTAMP))
                 .ifPresent(builder::startTimestamp);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.SERVER_TIME_ZONE))
                 .ifPresent(builder::serverTimeZone);
@@ -99,8 +102,6 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
                 .ifPresent(builder::sysUsername);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.SYS_PASSWORD))
                 .ifPresent(builder::sysPassword);
-        Optional.ofNullable(config.get(OceanBaseSourceOptions.SPLIT_SIZE))
-                .ifPresent(builder::splitSize);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.BATCH_SIZE))
                 .ifPresent(builder::batchSize);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.EXACTLY_ONCE))
@@ -114,10 +115,21 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
     @Override
     public DebeziumDeserializationSchema<T> createDebeziumDeserializationSchema(
             ReadonlyConfig config) {
-        // For OceanBase, we use the Debezium JSON format
+        // Check if user explicitly set COMPATIBLE_DEBEZIUM_JSON format
+        if (DeserializeFormat.COMPATIBLE_DEBEZIUM_JSON.equals(
+                config.get(JdbcSourceOptions.FORMAT))) {
+            return (DebeziumDeserializationSchema<T>)
+                    new DebeziumJsonDeserializeSchema(
+                            config.get(JdbcSourceOptions.DEBEZIUM_PROPERTIES));
+        }
+
+        // Use default SeaTunnelRowDebeziumDeserializeSchema with catalog table structure
+        String zoneId = config.get(JdbcSourceOptions.SERVER_TIME_ZONE);
         return (DebeziumDeserializationSchema<T>)
-                new DebeziumJsonDeserializeSchema(
-                        config.get(JdbcSourceOptions.DEBEZIUM_PROPERTIES));
+                SeaTunnelRowDebeziumDeserializeSchema.builder()
+                        .setTables(catalogTables)
+                        .setServerTimeZone(ZoneId.of(zoneId))
+                        .build();
     }
 
     @Override

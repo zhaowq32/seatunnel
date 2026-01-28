@@ -23,20 +23,23 @@ import org.apache.seatunnel.connectors.cdc.base.config.StopConfig;
 import org.apache.seatunnel.connectors.cdc.base.option.StartupMode;
 import org.apache.seatunnel.connectors.cdc.base.option.StopMode;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.exception.OceanBaseConnectorException;
+import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUtils;
 
+import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.seatunnel.common.exception.CommonErrorCode.ILLEGAL_ARGUMENT;
+import static org.apache.seatunnel.connectors.cdc.base.option.SourceOptions.STARTUP_TIMESTAMP;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.BATCH_SIZE;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.EXACTLY_ONCE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.LOGPROXY_PORT;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.LOG_PROXY_PORT;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SERVER_TIME_ZONE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SPLIT_SIZE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP_US;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.WORKING_MODE;
 import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkArgument;
 import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkState;
 
 public class OceanBaseSourceConfigProvider {
     private OceanBaseSourceConfigProvider() {}
@@ -46,40 +49,40 @@ public class OceanBaseSourceConfigProvider {
     }
 
     public static class Builder implements SourceConfig.Factory<OceanBaseSourceConfig> {
-        private String jdbcUrl;
-        private String logproxyHost;
-        private int logproxyPort = LOGPROXY_PORT.defaultValue();
+        private String url;
+        private String logProxyHost;
+        private int logProxyPort = LOG_PROXY_PORT.defaultValue();
         private String clusterUrl;
         private String rootServerList;
         private String username;
         private String password;
-        private String whiteTableList;
+        private String tenant;
+        private List<String> tableNames;
         private String blackTableList;
-        private Long startTimestamp = START_TIMESTAMP.defaultValue();
+        private Long startTimestamp = STARTUP_TIMESTAMP.defaultValue();
         private String serverTimeZone = SERVER_TIME_ZONE.defaultValue();
         private String workingMode = WORKING_MODE.defaultValue();
         private Long startTimestampUS = START_TIMESTAMP_US.defaultValue();
         private String clusterId;
         private String sysUsername;
         private String sysPassword;
-        private int splitSize = SPLIT_SIZE.defaultValue();
         private int batchSize = BATCH_SIZE.defaultValue();
         private boolean exactlyOnce = EXACTLY_ONCE.defaultValue();
         private StartupConfig startupConfig;
         private StopConfig stopConfig;
 
-        public Builder jdbcUrl(String jdbcUrl) {
-            this.jdbcUrl = jdbcUrl;
+        public Builder url(String url) {
+            this.url = url;
             return this;
         }
 
-        public Builder logproxyHost(String logproxyHost) {
-            this.logproxyHost = logproxyHost;
+        public Builder logProxyHost(String logProxyHost) {
+            this.logProxyHost = logProxyHost;
             return this;
         }
 
-        public Builder logproxyPort(int logproxyPort) {
-            this.logproxyPort = logproxyPort;
+        public Builder logProxyPort(int logProxyPort) {
+            this.logProxyPort = logProxyPort;
             return this;
         }
 
@@ -95,6 +98,7 @@ public class OceanBaseSourceConfigProvider {
 
         public Builder username(String username) {
             this.username = username;
+            this.tenant = OceanBaseUtils.extractTenant(username);
             return this;
         }
 
@@ -103,8 +107,8 @@ public class OceanBaseSourceConfigProvider {
             return this;
         }
 
-        public Builder whiteTableList(String whiteTableList) {
-            this.whiteTableList = whiteTableList;
+        public Builder tableNames(List<String> tableNames) {
+            this.tableNames = tableNames;
             return this;
         }
 
@@ -148,12 +152,6 @@ public class OceanBaseSourceConfigProvider {
             return this;
         }
 
-        public Builder splitSize(int splitSize) {
-            checkArgument(splitSize > 0, "splitSize must be positive");
-            this.splitSize = splitSize;
-            return this;
-        }
-
         public Builder batchSize(int batchSize) {
             checkArgument(batchSize > 0, "batchSize must be positive");
             this.batchSize = batchSize;
@@ -167,9 +165,7 @@ public class OceanBaseSourceConfigProvider {
 
         public Builder startupConfig(StartupConfig startupConfig) {
             this.startupConfig = Objects.requireNonNull(startupConfig);
-            if (startupConfig.getStartupMode() != StartupMode.INITIAL
-                    && startupConfig.getStartupMode() != StartupMode.LATEST
-                    && startupConfig.getStartupMode() != StartupMode.TIMESTAMP) {
+            if (startupConfig.getStartupMode() != StartupMode.TIMESTAMP) {
                 throw new OceanBaseConnectorException(
                         ILLEGAL_ARGUMENT,
                         "Unsupported startup mode " + startupConfig.getStartupMode());
@@ -188,22 +184,30 @@ public class OceanBaseSourceConfigProvider {
         }
 
         public Builder validate() {
-            checkNotNull(jdbcUrl, "jdbc-url must be provided");
+            checkNotNull(url, "url must be provided");
             checkNotNull(username, "username must be provided");
             checkNotNull(password, "password must be provided");
+            checkNotNull(tenant, "The username format is username@tenant.");
+            checkNotNull(tableNames, "table-names must be provided");
+            checkState(!tableNames.isEmpty(), "table-names must not empty");
             return this;
         }
 
         @Override
         public OceanBaseSourceConfig create(int subtask) {
+            String whiteTableList =
+                    tableNames.stream()
+                            .map(tableName -> tenant + "." + tableName)
+                            .collect(Collectors.joining("|"));
             return new OceanBaseSourceConfig(
-                    jdbcUrl,
-                    logproxyHost,
-                    logproxyPort,
+                    url,
+                    logProxyHost,
+                    logProxyPort,
                     clusterUrl,
                     rootServerList,
                     username,
                     password,
+                    tenant,
                     whiteTableList,
                     blackTableList,
                     startTimestamp,
@@ -213,7 +217,6 @@ public class OceanBaseSourceConfigProvider {
                     clusterId,
                     sysUsername,
                     sysPassword,
-                    splitSize,
                     batchSize,
                     exactlyOnce,
                     startupConfig,

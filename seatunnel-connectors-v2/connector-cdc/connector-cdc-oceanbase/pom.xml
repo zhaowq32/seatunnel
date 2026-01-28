@@ -24,6 +24,13 @@
                 <scope>compile</scope>
             </dependency>
 
+            <dependency>
+                <groupId>org.apache.seatunnel</groupId>
+                <artifactId>connector-jdbc</artifactId>
+                <version>${project.version}</version>
+                <scope>compile</scope>
+            </dependency>
+
             <!-- OceanBase LogClient -->
             <dependency>
                 <groupId>com.oceanbase</groupId>
@@ -40,6 +47,12 @@
             <groupId>org.apache.seatunnel</groupId>
             <artifactId>connector-cdc-base</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-jdbc</artifactId>
+            <scope>compile</scope>
         </dependency>
 
         <!-- OceanBase LogClient -->

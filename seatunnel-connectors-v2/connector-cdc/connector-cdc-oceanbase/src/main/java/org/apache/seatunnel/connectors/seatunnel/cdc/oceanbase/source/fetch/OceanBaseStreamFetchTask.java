@@ -30,7 +30,6 @@ import org.apache.kafka.connect.source.SourceRecord;
 
 import com.oceanbase.clogproxy.client.LogProxyClient;
 import com.oceanbase.clogproxy.client.listener.RecordListener;
-import com.oceanbase.oms.logmessage.DataMessage;
 import com.oceanbase.oms.logmessage.LogMessage;
 import io.debezium.connector.base.ChangeEventQueue;
 import io.debezium.pipeline.DataChangeEvent;
@@ -38,6 +37,7 @@ import io.debezium.relational.TableId;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -107,24 +107,28 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
             // Add record listener to handle incoming log messages
             logProxyClient.addListener(
                     new RecordListener() {
-                        @Override
-                        public void notify(LogMessage logMessage) {
-                            try {
-                                // Check if the message is for any of the current tables
-                                TableId matchedTableId =
-                                        findMatchedTable(
-                                                logMessage.getDbName(),
-                                                logMessage.getTableName(),
-                                                tableIds);
+                        private final List<LogMessage> logMessageList = new LinkedList<>();
+
+                        private void commitLogMessage() throws InterruptedException {
+                            if (logMessageList.isEmpty()) {
+                                return;
+                            }
+
+                            // Process each log message in the transaction batch
+                            for (LogMessage logMessage : logMessageList) {
+                                // Match table ID from LogMessage against split's table list
+                                TableId matchedTableId = matchTableId(logMessage, tableIds);
 
                                 if (matchedTableId == null) {
-                                    // Message is not for any table in this split
-                                    return;
+                                    // Skip messages for tables not in this split
+                                    continue;
                                 }
 
                                 // Extract offset from log message
                                 OceanBaseOffset currentOffset =
-                                        extractOffsetFromLogMessage(logMessage);
+                                        new OceanBaseOffset(
+                                                logMessage.getFileNameOffset(),
+                                                String.valueOf(logMessage.getFileNameOffset()));
 
                                 // Check if we've reached the stop offset
                                 if (stopOffset != null
@@ -132,6 +136,7 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                                                 >= stopOffset.getTimestamp()) {
                                     log.info("Reached stop offset {}", stopOffset);
                                     shutdown();
+                                    logMessageList.clear();
                                     return;
                                 }
 
@@ -142,6 +147,30 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                                 if (sourceRecord != null) {
                                     // Enqueue the change event
                                     changeEventQueue.enqueue(new DataChangeEvent(sourceRecord));
+                                }
+                            }
+                            logMessageList.clear();
+                        }
+
+                        @Override
+                        public void notify(LogMessage logMessage) {
+                            try {
+                                switch (logMessage.getOpt()) {
+                                    case HEARTBEAT:
+                                    case BEGIN:
+                                    case DDL:
+                                        break;
+                                    case INSERT:
+                                    case UPDATE:
+                                    case DELETE:
+                                        logMessageList.add(logMessage);
+                                        break;
+                                    case COMMIT:
+                                        commitLogMessage();
+                                        break;
+                                    default:
+                                        throw new UnsupportedOperationException(
+                                                "Unsupported type: " + logMessage.getOpt());
                                 }
                             } catch (Exception e) {
                                 log.error("Failed to process LogMessage", e);
@@ -207,17 +236,10 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
             OceanBaseSourceConfig sourceConfig, TableId tableId, LogMessage logMessage) {
 
         try {
-            // Filter by table if needed
-            if (!isTableMatched(logMessage.getDbName(), logMessage.getTableName(), tableId)) {
-                return null;
-            }
-
-            String operation =
-                    logMessage.getOpt() != null ? logMessage.getOpt().toString() : "UNKNOWN";
+            String operation = logMessage.getOpt().toString();
 
             // Build partition map (source partition)
             Map<String, String> partitionMap = new HashMap<>();
-            partitionMap.put("server", sourceConfig.getLogproxyHost());
             partitionMap.put("database", logMessage.getDbName());
             partitionMap.put("table", logMessage.getTableName());
 
@@ -229,27 +251,13 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
                 offsetMap.put("safe_timestamp", logMessage.getSafeTimestamp());
             }
 
-            // Parse timestamp
-            long timestampMs;
-            try {
-                long timestamp = Long.parseLong(logMessage.getTimestamp());
-                timestampMs = timestamp * 1000L; // Convert seconds to milliseconds
-            } catch (NumberFormatException e) {
-                log.warn(
-                        "Failed to parse timestamp: {}, using current time",
-                        logMessage.getTimestamp());
-                timestampMs = System.currentTimeMillis();
-            }
-
             // Build Debezium source metadata
             Map<String, Object> sourceMetadata = new HashMap<>();
             sourceMetadata.put("version", "1.0.0");
             sourceMetadata.put("connector", "oceanbase");
-            sourceMetadata.put("ts_ms", timestampMs);
             sourceMetadata.put("snapshot", "false");
             sourceMetadata.put("db", logMessage.getDbName());
             sourceMetadata.put("table", logMessage.getTableName());
-            sourceMetadata.put("server_id", sourceConfig.getLogproxyHost());
             if (logMessage.getCheckpoint() != null) {
                 sourceMetadata.put("checkpoint", logMessage.getCheckpoint());
             }
@@ -300,7 +308,6 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
 
             envelope.put("op", debeziumOp);
             envelope.put("source", sourceMetadata);
-            envelope.put("ts_ms", timestampMs);
 
             // Create SourceRecord with complete Debezium format
             return new SourceRecord(
@@ -391,56 +398,33 @@ public class OceanBaseStreamFetchTask implements FetchTask<SourceSplitBase> {
     }
 
     /**
-     * Extract offset from LogMessage
+     * Match table ID from LogMessage against split's table list
      *
-     * <p>For OceanBase, the safe checkpoint is determined as follows: - Heartbeat type: Use
-     * timestamp field as the safe checkpoint (in seconds) - Other types (DDL, DML): Use
-     * fileNameOffset field as the safe checkpoint
-     *
-     * <p>This is because libobcdc doesn't guarantee strict time ordering for data changes, so for
-     * DDL/DML types, fileNameOffset (which contains the most recent heartbeat timestamp) should be
-     * used as the safe checkpoint.
+     * @param logMessage LogMessage to match
+     * @param tableIds List of table IDs in this split
+     * @return Matched TableId, or null if no match
      */
-    private OceanBaseOffset extractOffsetFromLogMessage(LogMessage logMessage) {
-        long checkpoint;
-        if (DataMessage.Record.Type.HEARTBEAT.equals(logMessage.getOpt())) {
-            checkpoint = Long.parseLong(logMessage.getTimestamp());
-        } else {
-            checkpoint = logMessage.getFileNameOffset();
-        }
-        return new OceanBaseOffset(checkpoint, String.valueOf(checkpoint));
-    }
-
-    /** Check if table matches the split */
-    private boolean isTableMatched(String database, String table, TableId targetTableId) {
-        if (database == null || table == null || targetTableId == null) {
-            return false;
-        }
-        // In OceanBase, use schema() instead of catalog()
-        String targetDatabase =
-                targetTableId.schema() != null ? targetTableId.schema() : targetTableId.catalog();
-        return database.equals(targetDatabase) && table.equals(targetTableId.table());
-    }
-
-    /**
-     * Find the matched table from a list of tables
-     *
-     * @param database Database name from LogMessage
-     * @param table Table name from LogMessage
-     * @param tableIds List of TableId to match against
-     * @return Matched TableId or null if no match found
-     */
-    private TableId findMatchedTable(String database, String table, List<TableId> tableIds) {
-        if (database == null || table == null || tableIds == null || tableIds.isEmpty()) {
+    private TableId matchTableId(LogMessage logMessage, List<TableId> tableIds) {
+        if (logMessage == null || tableIds == null || tableIds.isEmpty()) {
             return null;
         }
 
+        String dbName = OceanBaseUtils.extractOceanBaseDbName(logMessage.getDbName());
+        String tableName = logMessage.getTableName();
+
+        if (dbName == null || tableName == null) {
+            return null;
+        }
+
+        // Match against split's table list
         for (TableId tableId : tableIds) {
-            if (isTableMatched(database, table, tableId)) {
+            // OceanBase uses catalog for database name
+            if (dbName.equals(tableId.catalog()) && tableName.equals(tableId.table())) {
                 return tableId;
             }
         }
 
+        // No match found - this message is not for tables in this split
         return null;
     }
 
