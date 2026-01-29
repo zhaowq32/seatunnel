@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.configuration.util.OptionRule;
 import org.apache.seatunnel.api.source.SeaTunnelSource;
 import org.apache.seatunnel.api.source.SourceSplit;
@@ -32,12 +33,14 @@ import org.apache.seatunnel.connectors.cdc.base.option.SourceOptions;
 import org.apache.seatunnel.connectors.cdc.base.source.BaseChangeStreamTableSourceFactory;
 import org.apache.seatunnel.connectors.cdc.base.utils.CatalogTableUtils;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions;
+import org.apache.seatunnel.connectors.seatunnel.jdbc.config.JdbcCommonOptions;
 
 import com.google.auto.service.AutoService;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.seatunnel.api.options.table.CatalogOptions.TABLE_NAMES;
@@ -52,10 +55,8 @@ import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.Oce
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.PASSWORD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.ROOT_SERVER_LIST;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SERVER_TIME_ZONE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP_US;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SYS_PASSWORD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SYS_USERNAME;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.URL;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.USERNAME;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.WORKING_MODE;
 
@@ -97,7 +98,7 @@ import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.Oce
  *   <li>{@code cluster_id} - 集群 ID
  *   <li>{@code sys_username} - 系统租户用户名
  *   <li>{@code sys_password} - 系统租户密码
- *   <li>{@code batch_size} - 批处理大小
+ *   <li>{@code batch_size} - 批处理大小(用于设置变更事件队列的最大队列大小)
  *   <li>{@code exactly_once} - 是否启用精确一次语义
  *   <li>{@code startup.mode} - 启动模式
  *   <li>{@code stop.mode} - 停止模式
@@ -129,7 +130,13 @@ public class OceanBaseIncrementalSourceFactory extends BaseChangeStreamTableSour
     public OptionRule optionRule() {
         return OptionRule.builder()
                 // 必填配置项
-                .required(URL, LOG_PROXY_HOST, LOG_PROXY_PORT, USERNAME, PASSWORD, TABLE_NAMES)
+                .required(
+                        JdbcCommonOptions.URL,
+                        LOG_PROXY_HOST,
+                        LOG_PROXY_PORT,
+                        USERNAME,
+                        PASSWORD,
+                        TABLE_NAMES)
                 // 可选配置项
                 .optional(
                         CLUSTER_URL,
@@ -138,7 +145,6 @@ public class OceanBaseIncrementalSourceFactory extends BaseChangeStreamTableSour
                         STARTUP_TIMESTAMP,
                         SERVER_TIME_ZONE,
                         WORKING_MODE,
-                        START_TIMESTAMP_US,
                         CLUSTER_ID,
                         SYS_USERNAME,
                         SYS_PASSWORD,
@@ -185,19 +191,15 @@ public class OceanBaseIncrementalSourceFactory extends BaseChangeStreamTableSour
                         restoreTables.size());
                 catalogTables = restoreTables;
             } else {
-                // 加载 JDBC 驱动到 DriverManager
-                try {
-                    Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
-                } catch (Exception e) {
-                    log.warn(
-                            "Failed to load JDBC driver {}",
-                            "com.microsoft.sqlserver.jdbc.SQLServerDriver",
-                            e);
-                }
+                // 填充 JdbcCommonOptions.URL 和 JdbcCommonOptions.COMPATIBLE_MODE
+                Map<String, Object> newConfigMap = context.getOptions().getSourceMap();
+                newConfigMap.put(JdbcCommonOptions.COMPATIBLE_MODE.key(), "mysql");
+                newConfigMap.put(
+                        JdbcCommonOptions.DRIVER.key(), OceanBaseIncrementalSource.DRIVER_NAME);
                 // 从配置加载表结构
                 catalogTables =
                         CatalogTableUtil.getCatalogTables(
-                                context.getOptions(), context.getClassLoader());
+                                ReadonlyConfig.fromMap(newConfigMap), context.getClassLoader());
                 // 处理表配置列表
                 Optional<List<JdbcSourceTableConfig>> tableConfigs =
                         context.getOptions().getOptional(JdbcSourceOptions.TABLE_NAMES_CONFIG);

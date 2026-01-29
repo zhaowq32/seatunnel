@@ -38,6 +38,7 @@ import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseS
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.dialect.OceanBaseDialect;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffsetFactory;
+import org.apache.seatunnel.connectors.seatunnel.jdbc.config.JdbcCommonOptions;
 
 import javax.annotation.Nonnull;
 
@@ -71,7 +72,9 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
         implements SupportParallelism {
 
     /** 连接器标识符，用于在配置中引用 */
-    static final String IDENTIFIER = "OceanBase-CDC";
+    public static final String IDENTIFIER = "OceanBase-CDC";
+
+    public static final String DRIVER_NAME = "com.oceanbase.jdbc.Driver";
 
     /**
      * 构造函数
@@ -128,19 +131,20 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
         OceanBaseSourceConfigProvider.Builder builder =
                 OceanBaseSourceConfigProvider.newBuilder()
                         // 基本连接配置
-                        .url(config.get(OceanBaseSourceOptions.URL))
+                        .url(config.get(JdbcCommonOptions.URL))
                         .username(config.get(OceanBaseSourceOptions.USERNAME))
                         .password(config.get(OceanBaseSourceOptions.PASSWORD))
                         // LogProxy 配置
                         .logProxyHost(config.get(OceanBaseSourceOptions.LOG_PROXY_HOST))
-                        .logProxyPort(config.get(OceanBaseSourceOptions.LOG_PROXY_PORT));
+                        .logProxyPort(config.get(OceanBaseSourceOptions.LOG_PROXY_PORT))
+                        // 同步表
+                        .tableNames(config.get(CatalogOptions.TABLE_NAMES));
 
         // 可选配置项
         Optional.ofNullable(config.get(OceanBaseSourceOptions.CLUSTER_URL))
                 .ifPresent(builder::clusterUrl);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.ROOT_SERVER_LIST))
                 .ifPresent(builder::rootServerList);
-        Optional.ofNullable(config.get(CatalogOptions.TABLE_NAMES)).ifPresent(builder::tableNames);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.BLACK_TABLE_LIST))
                 .ifPresent(builder::blackTableList);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.STARTUP_TIMESTAMP))
@@ -149,8 +153,6 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
                 .ifPresent(builder::serverTimeZone);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.WORKING_MODE))
                 .ifPresent(builder::workingMode);
-        Optional.ofNullable(config.get(OceanBaseSourceOptions.START_TIMESTAMP_US))
-                .ifPresent(builder::startTimestampUS);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.CLUSTER_ID))
                 .ifPresent(builder::clusterId);
         Optional.ofNullable(config.get(OceanBaseSourceOptions.SYS_USERNAME))
@@ -232,6 +234,6 @@ public class OceanBaseIncrementalSource<T> extends IncrementalSource<T, OceanBas
      */
     @Override
     public Optional<String> driverName() {
-        return Optional.of("com.oceanbase.jdbc.Driver");
+        return Optional.of(DRIVER_NAME);
     }
 }

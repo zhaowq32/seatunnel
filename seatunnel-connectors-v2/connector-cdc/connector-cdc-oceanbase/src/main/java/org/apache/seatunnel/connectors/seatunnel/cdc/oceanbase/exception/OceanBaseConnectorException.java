@@ -25,9 +25,4 @@ public class OceanBaseConnectorException extends SeaTunnelRuntimeException {
     public OceanBaseConnectorException(SeaTunnelErrorCode seaTunnelErrorCode, String errorMessage) {
         super(seaTunnelErrorCode, errorMessage);
     }
-
-    public OceanBaseConnectorException(
-            SeaTunnelErrorCode seaTunnelErrorCode, String errorMessage, Throwable cause) {
-        super(seaTunnelErrorCode, errorMessage, cause);
-    }
 }

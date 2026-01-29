@@ -27,7 +27,6 @@ import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils.OceanBaseUt
 
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static org.apache.seatunnel.common.exception.CommonErrorCode.ILLEGAL_ARGUMENT;
 import static org.apache.seatunnel.connectors.cdc.base.option.SourceOptions.STARTUP_TIMESTAMP;
@@ -35,10 +34,8 @@ import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.Oce
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.EXACTLY_ONCE;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.LOG_PROXY_PORT;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.SERVER_TIME_ZONE;
-import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.START_TIMESTAMP_US;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceOptions.WORKING_MODE;
 import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkArgument;
-import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkState;
 
 public class OceanBaseSourceConfigProvider {
@@ -62,7 +59,6 @@ public class OceanBaseSourceConfigProvider {
         private Long startTimestamp = STARTUP_TIMESTAMP.defaultValue();
         private String serverTimeZone = SERVER_TIME_ZONE.defaultValue();
         private String workingMode = WORKING_MODE.defaultValue();
-        private Long startTimestampUS = START_TIMESTAMP_US.defaultValue();
         private String clusterId;
         private String sysUsername;
         private String sysPassword;
@@ -132,11 +128,6 @@ public class OceanBaseSourceConfigProvider {
             return this;
         }
 
-        public Builder startTimestampUS(Long startTimestampUS) {
-            this.startTimestampUS = startTimestampUS;
-            return this;
-        }
-
         public Builder clusterId(String clusterId) {
             this.clusterId = clusterId;
             return this;
@@ -184,21 +175,13 @@ public class OceanBaseSourceConfigProvider {
         }
 
         public Builder validate() {
-            checkNotNull(url, "url must be provided");
-            checkNotNull(username, "username must be provided");
-            checkNotNull(password, "password must be provided");
-            checkNotNull(tenant, "The username format is username@tenant.");
-            checkNotNull(tableNames, "table-names must be provided");
-            checkState(!tableNames.isEmpty(), "table-names must not empty");
+            String tenantRegex = "^[^@#]+@[^@#]+(#[^@#]+)?$";
+            checkState(username.matches(tenantRegex), "The username format is username@tenant.");
             return this;
         }
 
         @Override
         public OceanBaseSourceConfig create(int subtask) {
-            String whiteTableList =
-                    tableNames.stream()
-                            .map(tableName -> tenant + "." + tableName)
-                            .collect(Collectors.joining("|"));
             return new OceanBaseSourceConfig(
                     url,
                     logProxyHost,
@@ -208,12 +191,11 @@ public class OceanBaseSourceConfigProvider {
                     username,
                     password,
                     tenant,
-                    whiteTableList,
+                    OceanBaseUtils.buildWhiteTableList(tenant, tableNames),
                     blackTableList,
                     startTimestamp,
                     serverTimeZone,
                     workingMode,
-                    startTimestampUS,
                     clusterId,
                     sysUsername,
                     sysPassword,

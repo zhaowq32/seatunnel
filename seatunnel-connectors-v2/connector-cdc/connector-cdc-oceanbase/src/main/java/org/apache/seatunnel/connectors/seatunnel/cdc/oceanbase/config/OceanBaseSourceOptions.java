@@ -41,19 +41,6 @@ public class OceanBaseSourceOptions extends SourceOptions {
     public static final String DIALECT_NAME = "OceanBase";
 
     /**
-     * JDBC 连接 URL
-     *
-     * <p>用于连接 OceanBase 数据库的 JDBC URL。
-     *
-     * <p>格式示例: jdbc:oceanbase://host:port/database
-     */
-    public static final Option<String> URL =
-            Options.key("url")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("JDBC url of the OceanBase LogProxy server.");
-
-    /**
      * LogProxy 服务主机地址
      *
      * <p>OceanBase 日志代理服务的主机名或 IP 地址。
@@ -64,7 +51,7 @@ public class OceanBaseSourceOptions extends SourceOptions {
             Options.key("log_proxy_host")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Hostname or IP address of OceanBase log proxy service.");
+                    .withDescription("Hostname or IP address of the OceanBase log proxy service.");
 
     /**
      * LogProxy 服务端口号
@@ -75,7 +62,7 @@ public class OceanBaseSourceOptions extends SourceOptions {
             Options.key("log_proxy_port")
                     .intType()
                     .defaultValue(2983)
-                    .withDescription("Port number of OceanBase log proxy service.");
+                    .withDescription("Port number of the OceanBase log proxy service.");
 
     /**
      * OceanBase 集群 URL (企业版)
@@ -165,20 +152,6 @@ public class OceanBaseSourceOptions extends SourceOptions {
                     .withDescription(
                             "The working mode of libobcdc can be set to either \"storage\" or \"memory\".");
 
-    /**
-     * 订阅数据的起始时间戳(微秒)
-     *
-     * <p>默认为 0,表示从当前时间开始订阅。
-     *
-     * <p>如果需要从历史时间点开始读取数据,可以设置此值。
-     */
-    public static final Option<Long> START_TIMESTAMP_US =
-            Options.key("start_timestamp_us")
-                    .longType()
-                    .defaultValue(0L)
-                    .withDescription(
-                            "The starting timestamp for the subscription data, in microseconds. A value of 0 means it will start from the current time.");
-
     /** OceanBase 集群 ID */
     public static final Option<String> CLUSTER_ID =
             Options.key("cluster_id")
@@ -211,15 +184,18 @@ public class OceanBaseSourceOptions extends SourceOptions {
     /**
      * 批次大小
      *
-     * <p>用于读取快照数据的批次大小,默认为 1024。
+     * <p>用于设置数据变更事件队列的最大队列大小,默认为 1024。
      *
-     * <p>较大的批次可提高吞吐量,但会增加内存使用。
+     * <p>该参数影响内存使用和吞吐量,较大的值可以提高吞吐量但会增加内存占用。
+     *
+     * <p>注意: OceanBase CDC 仅支持流式模式,此参数用于流式读取时的队列配置。
      */
     public static final Option<Integer> BATCH_SIZE =
             Options.key("batch_size")
                     .intType()
                     .defaultValue(1024)
-                    .withDescription("The batch size for reading snapshot data. Default is 1024.");
+                    .withDescription(
+                            "The max queue size for change event queue in streaming mode. Default is 1024.");
 
     /**
      * 是否启用 Exactly-Once 语义

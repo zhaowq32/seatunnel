@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.utils;
 
+import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.OceanBaseIncrementalSource;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.config.OceanBaseSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.exception.OceanBaseConnectorException;
 import org.apache.seatunnel.connectors.seatunnel.cdc.oceanbase.source.offset.OceanBaseOffset;
@@ -29,11 +30,18 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.seatunnel.common.exception.CommonErrorCode.ILLEGAL_ARGUMENT;
 
 @Slf4j
 public class OceanBaseUtils {
+    public static String buildWhiteTableList(String tenant, List<String> tableNames) {
+        return tableNames.stream()
+                .map(tableName -> tenant + "." + tableName)
+                .collect(Collectors.joining("|"));
+    }
+
     public static String extractTenant(String username) {
         if (username == null) {
             return null;
@@ -70,8 +78,7 @@ public class OceanBaseUtils {
     public static Connection createJdbcConnection(OceanBaseSourceConfig sourceConfig) {
         try {
             // Use default OceanBase JDBC driver
-            String jdbcDriver = "com.oceanbase.jdbc.Driver";
-            Class.forName(jdbcDriver);
+            Class.forName(OceanBaseIncrementalSource.DRIVER_NAME);
 
             // Use JDBC URL from source config
             String jdbcUrl = sourceConfig.getUrl();
@@ -173,13 +180,7 @@ public class OceanBaseUtils {
             log.info(
                     "Set LogProxy start timestamp from config: {}",
                     sourceConfig.getStartTimestamp());
-        } else if (sourceConfig.getStartTimestampUS() != null) {
-            obReaderConfig.setStartTimestampUs(sourceConfig.getStartTimestampUS());
-            log.info(
-                    "Set LogProxy start timestamp us from config: {}",
-                    sourceConfig.getStartTimestampUS());
         }
-
         return obReaderConfig;
     }
 

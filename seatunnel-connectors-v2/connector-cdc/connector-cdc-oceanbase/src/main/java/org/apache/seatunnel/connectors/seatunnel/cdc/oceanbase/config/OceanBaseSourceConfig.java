@@ -84,9 +84,6 @@ public class OceanBaseSourceConfig implements SourceConfig {
     /** libobcdc 工作模式,可选值: "storage" 或 "memory" */
     private final String workingMode;
 
-    /** 启动时间戳(微秒),0 表示从当前时间开始 */
-    private final Long startTimestampUS;
-
     /** OceanBase 集群 ID */
     private final String clusterId;
 
@@ -96,7 +93,7 @@ public class OceanBaseSourceConfig implements SourceConfig {
     /** 系统租户密码 */
     private final String sysPassword;
 
-    /** 批次大小,用于读取快照数据,默认 1024 */
+    /** 批次大小,用于设置变更事件队列的最大队列大小,默认 1024 */
     private final int batchSize;
 
     /** 是否启用 Exactly-Once 语义,默认 false */
@@ -122,7 +119,6 @@ public class OceanBaseSourceConfig implements SourceConfig {
             Long startTimestamp,
             String serverTimeZone,
             String workingMode,
-            Long startTimestampUS,
             String clusterId,
             String sysUsername,
             String sysPassword,
@@ -143,7 +139,6 @@ public class OceanBaseSourceConfig implements SourceConfig {
         this.startTimestamp = startTimestamp;
         this.serverTimeZone = serverTimeZone;
         this.workingMode = workingMode;
-        this.startTimestampUS = startTimestampUS;
         this.clusterId = clusterId;
         this.sysUsername = sysUsername;
         this.sysPassword = sysPassword;
